@@ -273,7 +273,7 @@ function selectDay(day) {
 
 /* ── Preview: fetch → cache → paint ───────────────────────────────────── */
 
-let cache = null;         // { key, arrays }
+let cache = null;         // { key, recipeKey, arrays }
 let inFlightKey = null;   // string
 let fetchAbort = null;    // AbortController for the in-flight COG reads
 let overlayId = null;
@@ -333,6 +333,7 @@ function invalidatePreview() {
 
 async function startFetch() {
   const key = sceneKey();
+  const recipeKey = sceneRecipeKey();
   if (!key) return;
   if (state.drawnAreaKm2 > HARD_LIMIT_KM2) return;
   if (cache?.key === key) { schedulePaint(); return; }
@@ -363,7 +364,7 @@ async function startFetch() {
       onLog: log.info,
       onPartial: (arrays, itemIdx, itemCount) => {
         if (sceneKey() !== key) return;
-        cache = { key, arrays };
+        cache = { key, recipeKey, arrays };
         set({ loading: { active: true, done: itemIdx, total: itemCount, message: `Streaming ${itemIdx}/${itemCount}` } });
         schedulePaint();
       },
@@ -434,7 +435,13 @@ subscribe((s) => {
   const viz = JSON.stringify(s.viz);
   if (viz !== lastViz) {
     lastViz = viz;
-    if (cache?.key === sceneKey()) schedulePaint();
+    // Repaint from whatever's cached as long as it's still for the current
+    // deliberate recipe (day/box/size/mode/bands) — NOT the full sceneKey,
+    // which also encodes the source-item ids and drifts on every
+    // background search (e.g. panning), well before the user does
+    // anything that should actually stop a look-only change from
+    // repainting the (still perfectly valid) cached pixels.
+    if (cache?.recipeKey === sceneRecipeKey()) schedulePaint();
   }
 
   // Auto-fetch when either: the recipe deliberately changed (new day/box/
