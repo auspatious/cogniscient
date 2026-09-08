@@ -1,11 +1,8 @@
-import { Map, NavigationControl, ScaleControl, GeolocateControl, setWorkerUrl } from 'maplibre-gl';
-import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
+import { Map, NavigationControl, ScaleControl, GeolocateControl } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
-// maplibre v6 resolves its worker relative to import.meta.url, which breaks
-// once Vite bundles it. ?worker&url makes Vite bundle the worker (with its
-// maplibre-gl-shared.mjs dependency) and hand us the real production path.
-setWorkerUrl(maplibreWorkerUrl);
+// maplibre-gl v5 (unlike v6) bundles/resolves its worker itself — no
+// setWorkerUrl()/explicit worker import needed for Vite to build cleanly.
 
 // Public client-side key, locked to allowed origins in the MapTiler dashboard.
 const MAPTILER_KEY = 'ZUYgDOuttJIaWHdE632Y';

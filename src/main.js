@@ -1,9 +1,10 @@
 import { area } from '@turf/area';
 import { bboxPolygon } from '@turf/bbox-polygon';
-import { state, set, subscribe, HARD_LIMIT_KM2 } from './state.js';
+import { state, set, subscribe, HARD_LIMIT_KM2, activeBands } from './state.js';
 import { createMap, BASEMAPS, setBasemap, createToggleControl } from './map.js';
 import { searchItems } from './stac.js';
-import { addFootprintLayers, setFootprints, setSelected } from './footprint-layer.js';
+import { addFootprintLayers, setFootprints, setSelected, FOOTPRINT_LAYER_IDS } from './footprint-layer.js';
+import { initLivePreview } from './live-preview.js';
 import { createRectangleDraw } from './rectangle-draw.js';
 import { groupByDay } from './mosaic.js';
 import { streamComposite, renderRGBA, toBlob, toBlobURL, cropToValid, toGeoTIFFBlob } from './export.js';
@@ -88,25 +89,70 @@ subscribe(() => {
   basemapControl.refresh();
 });
 
-// Toggle button for hiding/showing the preview overlay (to compare against
-// the bare basemap) without discarding the cached fetch — a repaint from
-// cache, not a re-fetch. Local UI state only, not shareable via URL.
+// Show/hide the preview overlay (to compare against the bare basemap)
+// without discarding the cached fetch — a repaint from cache, not a
+// re-fetch. Local UI state only, not shareable via URL. The toggle button
+// itself lives in the Area panel (renderAreaPanel), above the draw
+// rectangle controls — these are just the state and the effect it drives.
 let previewVisible = true;
 function applyPreviewVisibility() {
   if (overlayId && map.getLayer(overlayId)) {
     map.setLayoutProperty(overlayId, 'visibility', previewVisible ? 'visible' : 'none');
   }
+  // Hiding the preview also un-fades the outside-the-box area — both are
+  // "declutter and compare against the bare basemap" in one click.
+  if (map.getLayer('draw-fade-fill')) {
+    map.setLayoutProperty('draw-fade-fill', 'visibility', previewVisible ? 'visible' : 'none');
+  }
 }
-const previewControl = createToggleControl({
-  label: () => (previewVisible ? 'ON' : 'OFF'),
-  title: () => (previewVisible ? 'Preview visible — click to hide' : 'Preview hidden — click to show'),
+function togglePreviewVisible() {
+  previewVisible = !previewVisible;
+  applyPreviewVisibility();
+}
+
+// Toggle button for hiding/showing STAC footprints (all-items/selected-day/
+// hover highlight) — e.g. to see the live preview or basemap unobstructed.
+let footprintsVisible = true;
+function applyFootprintsVisibility() {
+  for (const id of FOOTPRINT_LAYER_IDS) {
+    if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', footprintsVisible ? 'visible' : 'none');
+  }
+}
+const footprintsControl = createToggleControl({
+  label: () => (footprintsVisible ? 'ON' : 'OFF'),
+  title: () => (footprintsVisible ? 'STAC footprints visible — click to hide' : 'STAC footprints hidden — click to show'),
   onClick: () => {
-    previewVisible = !previewVisible;
-    applyPreviewVisibility();
-    previewControl.refresh();
+    footprintsVisible = !footprintsVisible;
+    applyFootprintsVisibility();
+    footprintsControl.refresh();
   },
 });
-map.addControl(previewControl, 'top-right');
+map.addControl(footprintsControl, 'top-right');
+
+// All maplibre layers that should render above the live-preview COGLayers,
+// bottom-to-top. moveLayer(id) (no beforeId) moves a layer to the current
+// top of the whole style — calling it for each id in this order, every
+// time any of them changes, re-establishes the full stack regardless of
+// prior insertion order or which of them exist yet.
+const OVERLAY_LAYER_ORDER = [
+  'draw-fade-fill',
+  ...FOOTPRINT_LAYER_IDS,
+  'draw-box-fill', 'draw-box-outline',
+];
+function reassertLayerOrder() {
+  for (const id of OVERLAY_LAYER_ORDER) {
+    if (map.getLayer(id)) map.moveLayer(id);
+  }
+}
+// The lowest of the above that currently exists — the live preview anchors
+// beforeId here so it always renders below all of them (once any exist;
+// none of them exist before the very first search/draw, so it just
+// defaults to the top of the stack until then).
+function lowestOverlayLayerId() {
+  return OVERLAY_LAYER_ORDER.find((id) => map.getLayer(id));
+}
+
+const livePreview = initLivePreview(map, { getBeforeId: lowestOverlayLayerId });
 
 renderStatusPanel(document.getElementById('panel-status'));
 
@@ -119,8 +165,17 @@ window.addEventListener('unhandledrejection', (e) => {
 
 renderSearchPanel(document.getElementById('panel-search'), { onChange: runSearch, map });
 renderAreaPanel(document.getElementById('panel-area'), {
-  onDraw: () => { log.info('Click-drag on the map to draw.'); draw.start(); },
+  onDraw: () => {
+    log.info('Click-drag on the map to draw.');
+    draw.start();
+    // draw.start() creates the fade/box layers right away (ensureSources())
+    // — rebuild now so livePreview's beforeId anchors below them for the
+    // whole drag, not just after onDrawnBbox fires on mouseup.
+    livePreview.rebuild();
+  },
   onClear: () => { draw.clear(); log.info('Cleared box.'); },
+  onTogglePreview: togglePreviewVisible,
+  isPreviewVisible: () => previewVisible,
 });
 renderItemsPanel(document.getElementById('panel-items'), {
   onSelect: selectDay,
@@ -139,13 +194,19 @@ renderSharePanel(document.getElementById('panel-share'));
 // box, preview overlay) — so it all needs re-adding here every time.
 map.on('style.load', () => {
   addFootprintLayers(map);
+  applyFootprintsVisibility();
   if (state.drawnBbox) draw.setBbox(state.drawnBbox);
+  applyPreviewVisibility(); // draw-fade-fill is a fresh layer too, defaults visible
   syncFootprints();
   // The overlay source/layer is gone too; forget the stale id/url so the
   // next paint recreates them instead of trying to update what's missing.
   overlayId = null;
   overlayURL = null;
   if (cache) schedulePaint();
+  // The new style wiped livePreview's interleaved layer-group markers too
+  // (they're real map layers, unlike the overlaid-mode canvas) — rebuild
+  // against the freshly re-added footprint/box layers above.
+  livePreview.rebuild();
 });
 
 map.on('load', () => {
@@ -197,14 +258,20 @@ async function runSearch(debounce = false) {
       signal: searchAbort.signal,
     });
     const itemsByDay = groupByDay(items, state.drawnBbox);
-    // Never auto-clear the selection/preview from a search update — a
-    // search is viewport-scoped, so panning away from the drawn box (or a
-    // stricter cloud filter) can make the selected day vanish from
-    // itemsByDay without the box's actual, already-rendered scenes having
-    // changed at all. If it truly has no scenes left, its row just won't
-    // appear in the list — but the rendered image stays untouched, and
-    // redrawing the box (wherever it now is) recomputes fresh.
-    set({ items, itemsByDay });
+    // Never auto-clear an *existing* selection/preview from a search
+    // update — a search is viewport-scoped, so panning away from the drawn
+    // box (or a stricter cloud filter) can make the selected day vanish
+    // from itemsByDay without the box's actual, already-rendered scenes
+    // having changed at all. If it truly has no scenes left, its row just
+    // won't appear in the list — but the rendered image stays untouched,
+    // and redrawing the box (wherever it now is) recomputes fresh.
+    //
+    // But if nothing has ever been selected yet, default to the most
+    // recent day (itemsByDay is sorted newest-first) so there's something
+    // to look at without an extra click.
+    const patch = { items, itemsByDay };
+    if (!state.selectedDay && itemsByDay.length) patch.selectedDay = itemsByDay[0].day;
+    set(patch);
     syncFootprints();
     log.ok(`Search: ${items.length} item(s), ${itemsByDay.length} day(s).`);
   } catch (err) {
@@ -228,13 +295,15 @@ function syncFootprints() {
     : [];
   setSelected(map, selected);
   setFootprints(map, g && state.drawnBbox ? [] : state.items);
+  reassertLayerOrder();
 }
 
 /* ── Rectangle draw ───────────────────────────────────────────────────── */
 
 function onDrawnBbox({ bbox }) {
   if (!bbox) {
-    set({ drawnBbox: null, drawnAreaKm2: 0, itemsByDay: groupByDay(state.items, null), selectedDay: null });
+    const itemsByDay = groupByDay(state.items, null);
+    set({ drawnBbox: null, drawnAreaKm2: 0, itemsByDay, selectedDay: itemsByDay[0]?.day ?? null });
     syncFootprints();
     invalidatePreview();
     return;
@@ -242,17 +311,26 @@ function onDrawnBbox({ bbox }) {
   const areaKm2 = area(bboxPolygon(bbox)) / 1_000_000;
   const itemsByDay = groupByDay(state.items, bbox);
   const stillValid = state.selectedDay && itemsByDay.some((g) => g.day === state.selectedDay);
+  // Redrawing the box invalidates the old selection just as often as it
+  // carries it over — rather than leave the user with nothing picked,
+  // default to the most recent day available for the new box.
+  const selectedDay = stillValid ? state.selectedDay : (itemsByDay[0]?.day ?? null);
   set({
     drawnBbox: bbox,
     drawnAreaKm2: areaKm2,
     itemsByDay,
-    selectedDay: stillValid ? state.selectedDay : null,
+    selectedDay,
   });
   syncFootprints();
   invalidatePreview();
+  // If this is the first-ever box, 'draw-box-fill' didn't exist until just
+  // now (rectangle-draw.js creates it lazily) — force a rebuild so
+  // livePreview's beforeId picks it up even if day/items didn't change
+  // (the reactive path alone would skip a rebuild in that case).
+  livePreview.rebuild();
   if (areaKm2 > HARD_LIMIT_KM2) log.err(`Box ${areaKm2.toFixed(0)} km² — over ${HARD_LIMIT_KM2} km² limit.`);
   else log.info(`Box: ${areaKm2.toFixed(1)} km²`);
-  if (stillValid) startFetch();
+  if (selectedDay) startFetch();
 }
 
 const draw = createRectangleDraw(map, onDrawnBbox);
@@ -278,13 +356,6 @@ let inFlightKey = null;   // string
 let fetchAbort = null;    // AbortController for the in-flight COG reads
 let overlayId = null;
 let overlayURL = null;
-
-// bands/singleBand/indexBands per vizMode → the fetch inputs for that mode.
-function activeBands() {
-  if (state.vizMode === 'single') return { band: state.singleBand };
-  if (state.vizMode === 'index') return state.indexBands;
-  return state.bands;
-}
 
 // Filename-friendly description of what's actually in the image, e.g.
 // "rgb-red-green-blue", "single-nir", "index-nir-red".

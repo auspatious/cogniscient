@@ -333,7 +333,7 @@ button:disabled {
   color: var(--text);
 }
 
-.reset-btn {
+.small-btn {
   flex: 0 0 auto;
   background: transparent;
   color: var(--muted);
@@ -345,7 +345,7 @@ button:disabled {
   cursor: pointer;
 }
 
-.reset-btn:hover {
+.small-btn:hover {
   background: var(--border);
   color: var(--text);
 }

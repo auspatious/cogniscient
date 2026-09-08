@@ -10,6 +10,12 @@
 
 const EMPTY = { type: 'FeatureCollection', features: [] };
 
+// Whole-world ring (RFC 7946 exterior winding, counterclockwise) — paired
+// with a clockwise hole for the drawn box, this fades out everything
+// outside it. Not antimeridian-aware; fine for the box sizes this app
+// actually supports.
+const WORLD_RING = [[-180, -90], [180, -90], [180, 90], [-180, 90], [-180, -90]];
+
 export function createRectangleDraw(map, onBbox) {
   const canvas = map.getCanvasContainer();
   let startLngLat = null;
@@ -17,6 +23,13 @@ export function createRectangleDraw(map, onBbox) {
 
   function ensureSources() {
     if (map.getSource('draw-box')) return;
+    map.addSource('draw-fade', { type: 'geojson', data: EMPTY });
+    map.addLayer({
+      id: 'draw-fade-fill',
+      type: 'fill',
+      source: 'draw-fade',
+      paint: { 'fill-color': '#000000', 'fill-opacity': 0.45 },
+    });
     map.addSource('draw-box', { type: 'geojson', data: EMPTY });
     map.addLayer({
       id: 'draw-box-fill',
@@ -34,6 +47,21 @@ export function createRectangleDraw(map, onBbox) {
         'line-dasharray': [2, 1],
       },
     });
+  }
+
+  function fadeMaskFor(west, south, east, north) {
+    return {
+      type: 'Feature',
+      properties: {},
+      geometry: {
+        type: 'Polygon',
+        coordinates: [
+          WORLD_RING,
+          // Clockwise (opposite winding) — the hole revealing the box.
+          [[west, south], [west, north], [east, north], [east, south], [west, south]],
+        ],
+      },
+    };
   }
 
   function renderRectangle(a, b) {
@@ -59,6 +87,7 @@ export function createRectangleDraw(map, onBbox) {
     };
     ensureSources();
     map.getSource('draw-box').setData({ type: 'FeatureCollection', features: [poly] });
+    map.getSource('draw-fade').setData(fadeMaskFor(west, south, east, north));
     return { west, south, east, north };
   }
 
@@ -83,6 +112,7 @@ export function createRectangleDraw(map, onBbox) {
     // A stray click without a drag makes a zero-size box — treat as cancel.
     if (r.west === r.east || r.south === r.north) {
       map.getSource('draw-box').setData(EMPTY);
+      map.getSource('draw-fade').setData(EMPTY);
       onBbox?.({ bbox: null });
       return;
     }
@@ -107,6 +137,7 @@ export function createRectangleDraw(map, onBbox) {
     clear() {
       ensureSources();
       map.getSource('draw-box').setData(EMPTY);
+      map.getSource('draw-fade').setData(EMPTY);
       onBbox?.({ bbox: null });
     },
     /** Draws a box from a [west, south, east, north] bbox (e.g. restored

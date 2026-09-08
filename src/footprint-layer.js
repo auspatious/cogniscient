@@ -4,6 +4,12 @@
 
 const EMPTY = { type: 'FeatureCollection', features: [] };
 
+export const FOOTPRINT_LAYER_IDS = [
+  'stac-items-fill', 'stac-items-outline',
+  'stac-selected-fill', 'stac-selected-outline',
+  'stac-hover-fill', 'stac-hover-outline',
+];
+
 export function addFootprintLayers(map) {
   map.addSource('stac-items', { type: 'geojson', data: EMPTY });
   map.addSource('stac-selected', { type: 'geojson', data: EMPTY });

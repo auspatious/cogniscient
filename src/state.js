@@ -19,7 +19,7 @@ export function defaultDateRange() {
 // worth putting in a shareable URL. dateFrom/dateTo aren't here since
 // there's no fixed default to diff against — see defaultDateRange() above.
 export const DEFAULT_STATE = {
-  cloudCoverMax: 50,
+  cloudCoverMax: 100,
 
   // Which map.js BASEMAPS entry is showing.
   basemap: 'map',
@@ -62,7 +62,7 @@ export const DEFAULT_STATE = {
 export const state = {
   ...defaultDateRange(),
   collection: 'sentinel-2-l2a',
-  minSearchZoom: 8,
+  minSearchZoom: 4,
   nativeGSD: 10, // Sentinel-2 red/green/blue
 
   // STAC results
@@ -91,6 +91,15 @@ export function set(patch) {
 export function setViz(patch) {
   state.viz = { ...state.viz, ...patch };
   emit();
+}
+
+// Which asset key(s) the current vizMode reads — shared by main.js (the
+// CPU export path) and live-preview.js (the GPU one), so the two can't
+// drift apart on what "the active bands" means for a given mode.
+export function activeBands() {
+  if (state.vizMode === 'single') return { band: state.singleBand };
+  if (state.vizMode === 'index') return state.indexBands;
+  return state.bands;
 }
 
 export function subscribe(fn) {

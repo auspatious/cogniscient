@@ -7,8 +7,29 @@ const STEP = 128;
 
 let lastPaintKey = null;
 
-export function renderAreaPanel(el, { onDraw, onClear }) {
-  subscribe(() => paint(el, onDraw, onClear));
+export function renderAreaPanel(el, { onDraw, onClear, onTogglePreview, isPreviewVisible }) {
+  subscribe(() => paint(el, onDraw, onClear, onTogglePreview, isPreviewVisible));
+}
+
+function previewToggleHtml(visible) {
+  return `
+    <button
+      id="preview-toggle-btn"
+      class="small-btn"
+      title="${visible ? 'Hide the exported preview image (and the outside-the-box fade), without losing it — compare against the bare basemap.' : 'Show the exported preview image (and the outside-the-box fade) again.'}"
+    >${visible ? 'Hide' : 'Show'}</button>`;
+}
+
+function wirePreviewToggle(el, onTogglePreview, isPreviewVisible) {
+  const btn = el.querySelector('#preview-toggle-btn');
+  btn.addEventListener('click', () => {
+    onTogglePreview();
+    const visible = isPreviewVisible();
+    btn.textContent = visible ? 'Hide' : 'Show';
+    btn.title = visible
+      ? 'Hide the exported preview image, without losing it — compare against the bare basemap.'
+      : 'Show the exported preview image again.';
+  });
 }
 
 function tierClass(tier) {
@@ -22,18 +43,22 @@ function sizeLabel(s) {
   return `${s.width} × ${s.height} px at ${mPerPx.toFixed(1)} m/px`;
 }
 
-function paint(el, onDraw, onClear) {
+function paint(el, onDraw, onClear, onTogglePreview, isPreviewVisible) {
   const bbox = state.drawnBbox;
 
   if (!bbox) {
     if (lastPaintKey === 'empty') return;
     lastPaintKey = 'empty';
     el.innerHTML = `
-      <h2>Area</h2>
+      <div class="field-header">
+        <h2>Area</h2>
+        ${previewToggleHtml(isPreviewVisible())}
+      </div>
       <button id="draw-btn">Draw rectangle</button>
       <p class="hint">Click, then click-drag on the map to pick your area.</p>
     `;
     el.querySelector('#draw-btn').addEventListener('click', onDraw);
+    wirePreviewToggle(el, onTogglePreview, isPreviewVisible);
     return;
   }
 
@@ -63,7 +88,10 @@ function paint(el, onDraw, onClear) {
   lastPaintKey = paintKey;
 
   el.innerHTML = `
-    <h2>Area <span class="badge">${overLimit ? 'too large' : 'ready'}</span></h2>
+    <div class="field-header">
+      <h2>Area <span class="badge">${overLimit ? 'too large' : 'ready'}</span></h2>
+      ${previewToggleHtml(isPreviewVisible())}
+    </div>
     <div class="row">
       <button id="draw-btn">Redraw</button>
       <button id="clear-btn" class="secondary">Clear</button>
@@ -79,6 +107,7 @@ function paint(el, onDraw, onClear) {
 
   el.querySelector('#draw-btn').addEventListener('click', onDraw);
   el.querySelector('#clear-btn').addEventListener('click', onClear);
+  wirePreviewToggle(el, onTogglePreview, isPreviewVisible);
 
   const tw = el.querySelector('#tw');
   const twVal = el.querySelector('#tw-val');

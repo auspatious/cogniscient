@@ -8,8 +8,19 @@ behaviour should update this file in the same commit. No drift!
 1. **Search**: query the Earth Search STAC API
    (https://earth-search.aws.element84.com/v1, collection sentinel-2-l2a)
    for the current map view, with a date range (default: last 30 days) and
-   a max cloud cover filter (default: 50%). Searching requires a minimum
-   zoom level (8) to avoid huge result sets.
+   a max cloud cover filter (default: 100%, i.e. no filtering). Searching
+   requires a minimum zoom level (4 — roughly continent-scale) to avoid
+   huge result sets; the search's own `limit` (100) caps response size
+   further at any zoom.
+   - `searchItems()` (`src/stac.js`) caches by an exact
+     `{bbox, dateFrom, dateTo, cloudCoverMax, collection}` key (the promise
+     itself, not just its result, so concurrent identical calls collapse
+     into one fetch) — panning back over an already-searched extent,
+     toggling the basemap, or an undo-ish back-and-forth doesn't refire the
+     query. Deliberately exact-match only, no fuzzy/tile-snapped bbox
+     rounding or partial-coverage merging — `moveend` bboxes are
+     essentially never bit-identical across two different pans, so this
+     only (and only needs to) catch genuine repeat views. No TTL/eviction.
    - **Jump to a place**: a debounced (300ms) autocomplete box above the
      date range, forward-geocoding via Nominatim's `/search` endpoint
      (`searchPlaces()` in `geocode.js` — same silent-failure contract as
@@ -20,10 +31,16 @@ behaviour should update this file in the same commit. No drift!
 2. **Draw a box**: the user draws a rectangle on the map to define the
    export area. A stray click (zero-size box) cancels instead of drawing.
 3. **Pick a day**: results are grouped by acquisition day (`groupByDay` in
-   `mosaic.js`). A day only appears once a box is drawn if at least one of
-   its scenes intersects the box, but each day shows *every* scene the
-   search found for it — not just the intersecting ones — so you can see
-   what else was captured nearby:
+   `mosaic.js`), sorted newest-first. A day only appears once a box is
+   drawn if at least one of its scenes intersects the box, but each day
+   shows *every* scene the search found for it — not just the intersecting
+   ones — so you can see what else was captured nearby:
+   - The most recent day is selected automatically the moment there's a
+     list to pick from — no click needed. This only fires when nothing is
+     already selected (a fresh search, or a box redrawn such that the
+     previous selection no longer applies); it never overrides an existing
+     selection, including one a background search update alone made
+     temporarily vanish from the list (see the note on that below).
    - mean cloud cover (%) and coverage (%, how much of the drawn box the
      union of footprints covers) are both computed from the intersecting
      scenes only (`renderItems`) — the ones actually used for the mosaic.
@@ -54,6 +71,48 @@ behaviour should update this file in the same commit. No drift!
      brings it back — the rendered image is unaffected either way.
 4. **Preview**: a mosaicked RGB preview streams from the COGs and is shown
    as an image overlay on the map, georeferenced inside the drawn box.
+   - **Live scene preview** (`src/live-preview.js`, `initLivePreview()`): a
+     second, independent preview — every individual scene for the selected
+     day (not a merged composite, and not scoped to a drawn box), rendered
+     live via `deck.gl-raster`'s `COGLayer` (GPU adaptive-mesh reprojection)
+     on top of the map through `@deck.gl/mapbox`'s `MapboxOverlay`, in
+     **interleaved** mode — real `beforeId` z-ordering, so it renders below
+     footprints/the drawn box/the fade mask (`main.js`'s
+     `reassertLayerOrder()`/`lowestOverlayLayerId()`). Interleaved mode
+     originally hit a real MapLibre v6 incompatibility (its render-sync
+     path unconditionally read a non-public `map.transform` property
+     MapLibre v6 no longer exposes directly, having moved to an internal
+     `_camera` composition) — confirmed against `@deck.gl/mapbox`'s own
+     source and against deck.gl-raster's own `examples/land-cover` (pinned
+     to maplibre-gl v5, where interleaved mode works). Resolved by
+     downgrading `maplibre-gl` to `5.24.0` (see the `maplibre-gl` entry in
+     the Map section) rather than staying on overlaid mode's z-order
+     limitation.
+     - Always true-color RGB — each scene renders via its own
+       pre-stretched 8-bit `visual` COG asset, ignoring `state.viz`/
+       `vizMode` entirely, by design. A GPU-side pass-through of the full
+       Visualise styling (bands/stretch/gamma/colormap/index, via
+       deck.gl-raster's per-mode `MultiCOGLayer` + custom shader modules)
+       was built and reverted — real scenes rendered as flat grey tiles
+       rather than imagery (root cause not fully isolated: likely
+       `MultiCOGLayer`'s multi-band-source compositing, since the same
+       custom modules weren't yet in play for the failing `rgb`-mode
+       case). Not worth the added complexity for this app right now; the
+       full Visualise styling applies only to the drawn region's own
+       CPU-composited preview (`export.js`) — this live preview stays a
+       simple "what's available to browse" view.
+     - Reacts to `state.selectedDay`/`itemsByDay` changing.
+     - Fully independent of the CPU pipeline below: this is browsing, not
+       a source of truth for anything downloaded.
+     - Two dev-only Vite fixes this required, both in `vite.config.js`:
+       `optimizeDeps.esbuildOptions.target: 'es2022'` (a transitive dep,
+       `@developmentseed/lzw-tiff-decoder`, uses top-level `await`, which
+       the dev-server's dependency pre-bundler doesn't support at its
+       default target even though the production `build.target` already
+       was `es2022`), and adding `@developmentseed/geotiff` to
+       `optimizeDeps.exclude` (its COG decoder-pool Worker, constructed via
+       `new Worker(new URL('./worker.js', import.meta.url))`, can't survive
+       Vite's dev-time dependency rewriting).
 5. **Visualise** (one panel, combining band/index selection and look-tuning
    — they're one "how the pixels are computed and shown" concern):
    - A small "Reset" button beside the Preset label goes straight back to
@@ -195,22 +254,29 @@ behaviour should update this file in the same commit. No drift!
 
 ## Map
 
-- MapLibre GL with two MapTiler basemaps (`BASEMAPS` in `map.js`) — the
+- MapLibre GL JS **v5** (`5.24.0` — deliberately not v6; see the live scene
+  preview note above) with two MapTiler basemaps (`BASEMAPS` in `map.js`) — the
   dark dataviz style (default, button reads "MAP") and satellite imagery
   (button reads "SAT") — toggled via a compact button next to the zoom
   controls (`createToggleControl()`, a small reusable button showing
-  *current* state, also used for the preview-visibility button below).
-  Falls back to OSM raster on style error (e.g. local dev where the
-  MapTiler key is rejected).
+  *current* state). Also used for the STAC-footprints visibility toggle
+  ("ON"/"OFF", top-right, same row) — hides/shows the footprint layers via
+  a `visibility` layout-property flip on all of `FOOTPRINT_LAYER_IDS`
+  (`footprint-layer.js`), reapplied on every `'style.load'` since a style
+  swap creates fresh layer instances. Falls back to OSM raster on style
+  error (e.g. local dev where the MapTiler key is rejected).
   - `map.setStyle()` wipes any source/layer not defined in the new style's
     own JSON — i.e. everything this app adds itself (footprints, drawn
-    box, preview overlay). These re-add themselves on `'style.load'`
-    (fires on every style change, unlike `'load'`, which fires once ever)
-    so switching basemap never loses the current box/preview.
-- A second toggle button (same style) reads "ON"/"OFF" for whether the
-  preview overlay is currently shown, and shows/hides it without
-  discarding the cached fetch — a `visibility` layout-property flip, not a
-  re-render or re-fetch. Local UI state only, not part of the URL.
+    box, fade mask, preview overlay). These re-add themselves on
+    `'style.load'` (fires on every style change, unlike `'load'`, which
+    fires once ever) so switching basemap never loses the current
+    box/preview.
+- Preview show/hide lives in the **Area** panel instead (a small button
+  above the draw-rectangle controls, labelled "Hide preview"/"Show
+  preview" with a tooltip explaining what it does) — shows/hides the
+  preview overlay without discarding the cached fetch, a `visibility`
+  layout-property flip, not a re-render or re-fetch. Local UI state only,
+  not part of the URL.
 - Default view: whole world (center [0, 20], zoom 1).
 - STAC footprints always drawn (logo blue #3474c7); when a box is drawn
   and a day is selected, only that day's footprints show, highlighted in

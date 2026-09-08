@@ -152,7 +152,7 @@ export function renderVisualisePanel(el) {
       <div class="field">
         <div class="field-header">
           <label for="preset">Preset</label>
-          <button type="button" id="reset-viz" class="reset-btn" title="Back to true colour, all defaults">Reset</button>
+          <button type="button" id="reset-viz" class="small-btn" title="Back to true colour, all defaults">Reset</button>
         </div>
         <select id="preset">
           ${PRESETS.map((p) => `<option value="${p.id}" ${state.preset === p.id ? 'selected' : ''}>${p.label}</option>`).join('')}
