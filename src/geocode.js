@@ -20,16 +20,25 @@ export async function placeName(lon, lat) {
   if (cache.has(key)) return cache.get(key);
   let slug = null;
   try {
+    // zoom=16 (Nominatim's "major building"/locality tier) biases the
+    // match toward the nearest specific, named place — a peak, island, or
+    // locality — instead of always resolving to a city/town. Not every
+    // area has one, so `j.name` (the actual matched feature's own name)
+    // comes first, and the address hierarchy is only a fallback for when
+    // it doesn't — reversed from before, where the broad admin fields
+    // were tried first and a specific name was the last resort, which is
+    // why remote areas (no nearby city/town) always landed on the state.
     const url =
       `https://nominatim.openstreetmap.org/reverse?format=jsonv2` +
-      `&lat=${lat}&lon=${lon}&zoom=10&accept-language=en`;
+      `&lat=${lat}&lon=${lon}&zoom=16&accept-language=en`;
     const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
     if (res.ok) {
       const j = await res.json();
       const a = j.address || {};
       const name =
-        a.city || a.town || a.village || a.municipality || a.county ||
-        a.state_district || a.state || a.island || a.country || j.name;
+        j.name || a.hamlet || a.suburb || a.village || a.town || a.city ||
+        a.municipality || a.county || a.state_district || a.state ||
+        a.island || a.country;
       if (name) slug = slugify(name) || null;
     }
   } catch {
