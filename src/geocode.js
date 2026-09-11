@@ -14,23 +14,35 @@ export function slugify(name) {
     .toLowerCase();
 }
 
-/** Returns a slugified place name for [lon, lat], or null. */
-export async function placeName(lon, lat) {
-  const key = `${lon.toFixed(3)},${lat.toFixed(3)}`;
+// Nominatim's reverse-geocode "zoom" picks which layer of feature it
+// matches (10 = city, 14 = suburb, 18 = building) — map the drawn export
+// box's extent onto that scale so a city-wide export names the city and a
+// small, zoomed-in box names the local feature (a beach, a peak) instead.
+function zoomForExtent(extentDeg) {
+  if (extentDeg >= 2) return 6; // state/region
+  if (extentDeg >= 0.5) return 8; // county
+  if (extentDeg >= 0.15) return 10; // city
+  if (extentDeg >= 0.05) return 12; // town
+  if (extentDeg >= 0.02) return 14; // suburb/neighbourhood
+  if (extentDeg >= 0.005) return 16; // locality
+  return 18; // building/beach scale
+}
+
+/** Returns a slugified place name for the drawn export bbox [w, s, e, n], or null. */
+export async function placeName([w, s, e, n]) {
+  const lon = (w + e) / 2;
+  const lat = (s + n) / 2;
+  const zoom = zoomForExtent(Math.max(e - w, n - s));
+  const key = `${lon.toFixed(3)},${lat.toFixed(3)},${zoom}`;
   if (cache.has(key)) return cache.get(key);
   let slug = null;
   try {
-    // zoom=16 (Nominatim's "major building"/locality tier) biases the
-    // match toward the nearest specific, named place — a peak, island, or
-    // locality — instead of always resolving to a city/town. Not every
-    // area has one, so `j.name` (the actual matched feature's own name)
-    // comes first, and the address hierarchy is only a fallback for when
-    // it doesn't — reversed from before, where the broad admin fields
-    // were tried first and a specific name was the last resort, which is
-    // why remote areas (no nearby city/town) always landed on the state.
+    // `j.name` (the matched feature's own name) comes first, then the
+    // address hierarchy as a fallback for when the matched layer has none
+    // of its own name (e.g. an unnamed county polygon).
     const url =
       `https://nominatim.openstreetmap.org/reverse?format=jsonv2` +
-      `&lat=${lat}&lon=${lon}&zoom=16&accept-language=en`;
+      `&lat=${lat}&lon=${lon}&zoom=${zoom}&accept-language=en`;
     const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
     if (res.ok) {
       const j = await res.json();

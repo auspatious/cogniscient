@@ -512,8 +512,7 @@ async function buildExportBlob(fmt) {
 }
 
 async function exportBaseFilename(outWidth) {
-  const [w, s, e, n] = state.drawnBbox;
-  const place = await placeName((w + e) / 2, (s + n) / 2);
+  const place = await placeName(state.drawnBbox);
   const suffix = place ? `-${place}` : '';
   return `cogniscient-${state.selectedDay}-${bandsSlug()}-${outWidth}px${suffix}`;
 }
