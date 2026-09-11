@@ -37,6 +37,14 @@ describe('placeName', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }));
     expect(await placeName(3.456, 4.567)).toBeNull();
   });
+
+  it('prefers the matched feature\'s own name over broad admin fields', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ name: 'Cradle Mountain', address: { state: 'Tasmania', country: 'Australia' } }),
+    }));
+    expect(await placeName(145.95, -41.68)).toBe('cradle-mountain');
+  });
 });
 
 describe('searchPlaces', () => {
