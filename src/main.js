@@ -252,6 +252,7 @@ function onDrawnBbox({ bbox }) {
   invalidatePreview();
   if (areaKm2 > HARD_LIMIT_KM2) log.err(`Box ${areaKm2.toFixed(0)} km² — over ${HARD_LIMIT_KM2} km² limit.`);
   else log.info(`Box: ${areaKm2.toFixed(1)} km²`);
+  placeName(bbox).then((place) => { if (place) log.info(`Region: ${place}`); });
   if (stillValid) startFetch();
 }
 
@@ -512,8 +513,7 @@ async function buildExportBlob(fmt) {
 }
 
 async function exportBaseFilename(outWidth) {
-  const [w, s, e, n] = state.drawnBbox;
-  const place = await placeName((w + e) / 2, (s + n) / 2);
+  const place = await placeName(state.drawnBbox);
   const suffix = place ? `-${place}` : '';
   return `cogniscient-${state.selectedDay}-${bandsSlug()}-${outWidth}px${suffix}`;
 }

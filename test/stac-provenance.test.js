@@ -75,7 +75,7 @@ describe('buildStacProvenance', () => {
   it('always links to the webapp, and to a reproduce URL only when one is given', () => {
     const withoutReproduce = buildStacProvenance({ appState: baseState, sourceItems: [] });
     expect(withoutReproduce.links).toContainEqual({
-      rel: 'about', href: 'https://cogniscient.auspatious.com/', title: 'Generated with Cogniscient',
+      rel: 'about', href: 'https://cogniscient.auspatious.com/', type: 'text/html', title: 'Generated with Cogniscient',
     });
     expect(withoutReproduce.links.some((l) => l.rel === 'alternate')).toBe(false);
 
@@ -83,7 +83,7 @@ describe('buildStacProvenance', () => {
       appState: baseState, sourceItems: [], reproduceUrl: 'https://cogniscient.auspatious.com/?bbox=1_2_3_4',
     });
     expect(withReproduce.links).toContainEqual({
-      rel: 'alternate', href: 'https://cogniscient.auspatious.com/?bbox=1_2_3_4', title: 'Reproduce this export in Cogniscient',
+      rel: 'alternate', href: 'https://cogniscient.auspatious.com/?bbox=1_2_3_4', type: 'text/html', title: 'Reproduce this export in Cogniscient',
     });
   });
 

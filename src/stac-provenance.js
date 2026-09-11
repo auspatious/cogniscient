@@ -46,8 +46,10 @@ export function buildStacProvenance({ appState, sourceItems, reproduceUrl, expor
   const format = appState.viz.format;
 
   const links = [
-    { rel: 'about', href: APP_URL, title: 'Generated with Cogniscient' },
-    ...(reproduceUrl ? [{ rel: 'alternate', href: reproduceUrl, title: 'Reproduce this export in Cogniscient' }] : []),
+    { rel: 'about', href: APP_URL, type: 'text/html', title: 'Generated with Cogniscient' },
+    // Without `type`, STAC Browser assumes JSON, fails to parse this HTML
+    // page, and won't render the link as clickable.
+    ...(reproduceUrl ? [{ rel: 'alternate', href: reproduceUrl, type: 'text/html', title: 'Reproduce this export in Cogniscient' }] : []),
     ...sourceItems
       .map((item) => {
         const href = selfHref(item);
