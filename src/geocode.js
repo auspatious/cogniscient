@@ -28,6 +28,19 @@ function zoomForExtent(extentDeg) {
   return 18; // building/beach scale
 }
 
+// At high zoom Nominatim often matches the nearest road, path, building, or
+// parking lot rather than a real place — its `addresstype` says what kind
+// of feature it actually matched. Only trust the matched feature's own
+// name (`j.name`) when that type is a genuine place, so a beach-scale
+// export doesn't get named after e.g. "Overland Track" or "Campbell
+// Parade"; anything else falls through to the address hierarchy.
+const PLACE_ADDRESS_TYPES = new Set([
+  'suburb', 'hamlet', 'village', 'town', 'city', 'municipality', 'county',
+  'state_district', 'state', 'island', 'country', 'neighbourhood', 'borough',
+  'city_district', 'region', 'peak', 'bay', 'beach', 'nature_reserve',
+  'national_park', 'locality',
+]);
+
 /** Returns a slugified place name for the drawn export bbox [w, s, e, n], or null. */
 export async function placeName([w, s, e, n]) {
   const lon = (w + e) / 2;
@@ -37,9 +50,6 @@ export async function placeName([w, s, e, n]) {
   if (cache.has(key)) return cache.get(key);
   let slug = null;
   try {
-    // `j.name` (the matched feature's own name) comes first, then the
-    // address hierarchy as a fallback for when the matched layer has none
-    // of its own name (e.g. an unnamed county polygon).
     const url =
       `https://nominatim.openstreetmap.org/reverse?format=jsonv2` +
       `&lat=${lat}&lon=${lon}&zoom=${zoom}&accept-language=en`;
@@ -47,8 +57,9 @@ export async function placeName([w, s, e, n]) {
     if (res.ok) {
       const j = await res.json();
       const a = j.address || {};
+      const ownName = PLACE_ADDRESS_TYPES.has(j.addresstype) ? j.name : null;
       const name =
-        j.name || a.hamlet || a.suburb || a.village || a.town || a.city ||
+        ownName || a.hamlet || a.suburb || a.village || a.town || a.city ||
         a.municipality || a.county || a.state_district || a.state ||
         a.island || a.country;
       if (name) slug = slugify(name) || null;

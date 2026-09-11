@@ -41,9 +41,37 @@ describe('placeName', () => {
   it('prefers the matched feature\'s own name over broad admin fields', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ name: 'Cradle Mountain', address: { state: 'Tasmania', country: 'Australia' } }),
+      json: async () => ({
+        name: 'Cradle Mountain',
+        addresstype: 'hamlet',
+        address: { state: 'Tasmania', country: 'Australia' },
+      }),
     }));
     expect(await placeName([145.94, -41.69, 145.96, -41.67])).toBe('cradle-mountain');
+  });
+
+  it('ignores the matched feature\'s own name when it is a road, not a place', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        name: 'Campbell Parade',
+        addresstype: 'road',
+        address: { suburb: 'Bondi Beach', city: 'Sydney' },
+      }),
+    }));
+    expect(await placeName([151.2731, -33.8912, 151.2741, -33.8902])).toBe('bondi-beach');
+  });
+
+  it('ignores the matched feature\'s own name when it is a building/amenity', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        name: '',
+        addresstype: 'building',
+        address: { suburb: 'Bondi Beach', city: 'Sydney' },
+      }),
+    }));
+    expect(await placeName([151.2751, -33.8932, 151.2761, -33.8922])).toBe('bondi-beach');
   });
 
   it('requests a low (city-level) zoom for a wide, zoomed-out export box', async () => {
