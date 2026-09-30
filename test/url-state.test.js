@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseParams, buildParams } from '../src/url-state.js';
+import { parseParams, buildParams, urlStateToPatch } from '../src/url-state.js';
 import { DEFAULT_STATE, defaultDateRange } from '../src/state.js';
 
 describe('parseParams', () => {
@@ -204,5 +204,18 @@ describe('buildParams', () => {
       indexBands: { a: 'swir16', b: 'green' },
       viz: { vmin: -1, vmax: 1, colormap: 'rdylgn', colormapReversed: true },
     });
+  });
+});
+
+describe('urlStateToPatch', () => {
+  it('searches just the shared day when no range is given', () => {
+    const patch = urlStateToPatch(parseParams('?datetime=2026-09-20&width=300'), DEFAULT_STATE.viz);
+    expect(patch).toMatchObject({ dateFrom: '2026-09-20', dateTo: '2026-09-20', targetWidth: 300 });
+  });
+
+  it('merges a partial viz onto the current viz instead of replacing it', () => {
+    const patch = urlStateToPatch(parseParams('?vmax=5000&bands=nir-red-green'), DEFAULT_STATE.viz);
+    expect(patch.viz).toEqual({ ...DEFAULT_STATE.viz, vmax: 5000 });
+    expect(patch.bands).toEqual({ r: 'nir', g: 'red', b: 'green' });
   });
 });

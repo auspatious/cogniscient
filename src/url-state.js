@@ -125,6 +125,33 @@ export function parseParams(search) {
 }
 
 /**
+ * Turns parseParams()'s output into a state patch — the merge shared by the
+ * web app's URL restore and the CLI's --url. `currentViz` is the base `viz`
+ * the URL's partial `viz` is merged onto, so omitted fields don't become
+ * `undefined` and poison the vmin/vmax stretch with NaN. (basemap, bbox and
+ * the selected day are applied by the caller — they need the map.)
+ */
+export function urlStateToPatch(urlState, currentViz) {
+  const patch = {};
+  if (urlState.dateFrom) patch.dateFrom = urlState.dateFrom;
+  if (urlState.dateTo) patch.dateTo = urlState.dateTo;
+  // A specific shared day with no explicit range: search just that day, not
+  // the rolling default, which may no longer include it.
+  if (!urlState.dateFrom && !urlState.dateTo && urlState.selectedDatetime) {
+    patch.dateFrom = urlState.selectedDatetime;
+    patch.dateTo = urlState.selectedDatetime;
+  }
+  if (urlState.cloudCoverMax !== undefined) patch.cloudCoverMax = urlState.cloudCoverMax;
+  if (urlState.width !== undefined) patch.targetWidth = urlState.width;
+  if (urlState.visualiseSettings) {
+    const { viz, ...rest } = urlState.visualiseSettings;
+    Object.assign(patch, rest);
+    if (viz) patch.viz = { ...currentViz, ...viz };
+  }
+  return patch;
+}
+
+/**
  * Builds the query params for the current shareable state, preserving any
  * existing params this app doesn't know about (`currentSearch`). Only
  * fields that differ from DEFAULT_STATE are written.

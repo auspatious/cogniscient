@@ -3,6 +3,7 @@ import proj4 from 'proj4';
 import { bboxPolygon } from '@turf/bbox-polygon';
 import { booleanIntersects } from '@turf/boolean-intersects';
 import { colormapLUT } from './colormap.js';
+import { encodeImage, MIME } from './encode.js';
 
 const pool = new Pool();
 
@@ -455,11 +456,7 @@ export function bboxForCrop(bbox, width, height, bounds) {
 /* ── Encode ───────────────────────────────────────────────────────────── */
 
 export async function toBlob(img, format = 'png', quality = 0.92) {
-  const canvas = new OffscreenCanvas(img.width, img.height);
-  const ctx = canvas.getContext('2d');
-  ctx.putImageData(img, 0, 0);
-  const mime = format === 'jpg' ? 'image/jpeg' : 'image/png';
-  return canvas.convertToBlob({ type: mime, quality });
+  return new Blob([encodeImage(img, format, Math.round(quality * 100))], { type: MIME[format] ?? MIME.png });
 }
 
 export async function toBlobURL(img, format = 'png') {

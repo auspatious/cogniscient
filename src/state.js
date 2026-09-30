@@ -6,6 +6,8 @@
 const listeners = new Set();
 
 export const HARD_LIMIT_KM2 = 10000;
+export const DEFAULT_COLLECTION = 'sentinel-2-l2a';
+export const DEFAULT_NATIVE_GSD = 10; // Sentinel-2 red/green/blue
 
 /** Search filters default to the last 30 days, computed fresh each call. */
 export function defaultDateRange() {
@@ -19,7 +21,7 @@ export function defaultDateRange() {
 // worth putting in a shareable URL. dateFrom/dateTo aren't here since
 // there's no fixed default to diff against — see defaultDateRange() above.
 export const DEFAULT_STATE = {
-  cloudCoverMax: 50,
+  cloudCoverMax: 80,
 
   // Which map.js BASEMAPS entry is showing.
   basemap: 'map',
@@ -61,9 +63,9 @@ export const DEFAULT_STATE = {
 
 export const state = {
   ...defaultDateRange(),
-  collection: 'sentinel-2-l2a',
+  collection: DEFAULT_COLLECTION,
   minSearchZoom: 8,
-  nativeGSD: 10, // Sentinel-2 red/green/blue
+  nativeGSD: DEFAULT_NATIVE_GSD,
 
   // STAC results
   items: [],
