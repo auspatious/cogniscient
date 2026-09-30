@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { slugify, placeName, searchPlaces } from '../src/geocode.js';
 
 describe('slugify', () => {
@@ -16,6 +16,10 @@ describe('slugify', () => {
 });
 
 describe('placeName', () => {
+  beforeEach(() => {
+    // Skip the 1.1s politeness delay between Nominatim requests.
+    vi.stubGlobal('setTimeout', (fn) => { fn(); return 0; });
+  });
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -72,6 +76,28 @@ describe('placeName', () => {
       }),
     }));
     expect(await placeName([151.2751, -33.8932, 151.2761, -33.8922])).toBe('bondi-beach');
+  });
+
+  it('names the most prominent island in the box when the centre is open water', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ addresstype: 'state', name: 'Tasmania', address: { state: 'Tasmania', country: 'Australia' } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ([{ name: 'Tin Kettle Island', importance: 0.358 }, { name: 'Truwana / Cape Barren Island', importance: 0.405 }]) });
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await placeName([147.93138, -40.40463, 148.46714, -40.17049])).toBe('truwana-cape-barren-island');
+    expect(fetchMock.mock.calls[1][0]).toContain('/search?');
+    expect(fetchMock.mock.calls[1][0]).toContain('bounded=1');
+  });
+
+  it('falls back to the state when no island is found, and skips the search for state-sized boxes', async () => {
+    const reverse = { ok: true, json: async () => ({ addresstype: 'state', address: { state: 'Tasmania' } }) };
+    const noIslands = vi.fn().mockResolvedValueOnce(reverse).mockResolvedValueOnce({ ok: true, json: async () => ([]) });
+    vi.stubGlobal('fetch', noIslands);
+    expect(await placeName([147.0, -41.0, 147.4, -40.8])).toBe('tasmania');
+
+    const wide = vi.fn().mockResolvedValue(reverse);
+    vi.stubGlobal('fetch', wide);
+    expect(await placeName([144, -43, 148.5, -40])).toBe('tasmania');
+    expect(wide).toHaveBeenCalledTimes(1); // zoom 6: a state IS the right answer
   });
 
   it('requests a low (city-level) zoom for a wide, zoomed-out export box', async () => {
