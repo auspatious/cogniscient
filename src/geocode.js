@@ -5,6 +5,10 @@
 
 const cache = new Map();
 
+// Nominatim's usage policy blocks anonymous non-browser clients, so the CLI
+// has to identify itself; browsers can't set User-Agent and don't need to.
+const headers = globalThis.window ? undefined : { 'User-Agent': 'cogniscient-cli (https://github.com/auspatious/cogniscient)' };
+
 export function slugify(name) {
   return name
     .normalize('NFKD')
@@ -34,12 +38,35 @@ function zoomForExtent(extentDeg) {
 // name (`j.name`) when that type is a genuine place, so a beach-scale
 // export doesn't get named after e.g. "Overland Track" or "Campbell
 // Parade"; anything else falls through to the address hierarchy.
+// (state/country/region are deliberately absent: they're the fallback of last
+// resort below, not a "local" name that should stop the island search.)
 const PLACE_ADDRESS_TYPES = new Set([
   'suburb', 'hamlet', 'village', 'town', 'city', 'municipality', 'county',
-  'state_district', 'state', 'island', 'country', 'neighbourhood', 'borough',
-  'city_district', 'region', 'peak', 'bay', 'beach', 'nature_reserve',
+  'state_district', 'island', 'neighbourhood', 'borough',
+  'city_district', 'peak', 'bay', 'beach', 'nature_reserve',
   'national_park', 'locality',
 ]);
+
+// Nominatim asks for at most one request per second.
+const REQUEST_GAP_MS = 1100;
+
+// Reverse geocoding only sees the single point at the box's centre, which
+// over open water or wilderness has nothing local to report — it falls all
+// the way back to the state. Search for the most prominent island *inside*
+// the box instead (ranked by Nominatim's importance).
+// ponytail: islands only — a sea box with no islands still gets the state.
+async function islandIn([w, s, e, n]) {
+  await new Promise((resolve) => setTimeout(resolve, REQUEST_GAP_MS));
+  const url =
+    `https://nominatim.openstreetmap.org/search?format=jsonv2&q=island` +
+    `&viewbox=${w},${n},${e},${s}&bounded=1&limit=10&accept-language=en`;
+  const res = await fetch(url, { headers, signal: AbortSignal.timeout(4000) });
+  if (!res.ok) return null;
+  const results = await res.json();
+  if (!Array.isArray(results) || !results.length) return null;
+  // Rank it ourselves: with a small `limit` Nominatim's pick isn't stable.
+  return results.reduce((best, r) => ((r.importance ?? 0) > (best.importance ?? 0) ? r : best)).name ?? null;
+}
 
 /** Returns a slugified place name for the drawn export bbox [w, s, e, n], or null. */
 export async function placeName([w, s, e, n]) {
@@ -53,15 +80,17 @@ export async function placeName([w, s, e, n]) {
     const url =
       `https://nominatim.openstreetmap.org/reverse?format=jsonv2` +
       `&lat=${lat}&lon=${lon}&zoom=${zoom}&accept-language=en`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(4000) });
     if (res.ok) {
       const j = await res.json();
       const a = j.address || {};
       const ownName = PLACE_ADDRESS_TYPES.has(j.addresstype) ? j.name : null;
-      const name =
+      let name =
         ownName || a.hamlet || a.suburb || a.village || a.town || a.city ||
-        a.municipality || a.county || a.state_district || a.state ||
-        a.island || a.country;
+        a.municipality || a.county || a.state_district;
+      // Nothing more local than a state, for a box smaller than one (zoom 8+).
+      if (!name && zoom >= 8) name = await islandIn([w, s, e, n]);
+      name ||= a.state || a.island || a.country;
       if (name) slug = slugify(name) || null;
     }
   } catch {
