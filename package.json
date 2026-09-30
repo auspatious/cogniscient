@@ -4,12 +4,13 @@
   "version": "0.1.0",
   "type": "module",
   "license": "Apache-2.0",
-  "description": "Pure client-side web tool for exporting pretty pictures from cloud-native Earth observation data.",
+  "description": "Client-side web app and CLI for exporting pretty pictures from cloud-native Earth observation data.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview --host",
-    "test": "vitest run"
+    "test": "vitest run",
+    "cli": "node bin/cogniscient.js"
   },
   "devDependencies": {
     "vite": "^5.4.21",
@@ -23,9 +24,14 @@
     "@turf/helpers": "^7.4.0",
     "@turf/intersect": "^7.4.0",
     "@turf/union": "^7.4.0",
+    "fast-png": "^8.0.0",
     "flatpickr": "^4.6.13",
     "geotiff": "^3.0.5",
+    "jpeg-js": "^0.4.4",
     "maplibre-gl": "^6.3.0",
     "proj4": "^2.21.0"
+  },
+  "bin": {
+    "cogniscient": "bin/cogniscient.js"
   }
 }

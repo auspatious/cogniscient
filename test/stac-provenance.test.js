@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildStacProvenance } from '../src/stac-provenance.js';
+import { buildStacProvenance, parseStacProvenance } from '../src/stac-provenance.js';
 
 describe('buildStacProvenance', () => {
   const baseState = {
@@ -117,5 +117,39 @@ describe('buildStacProvenance', () => {
       roles: ['visual'],
       title: 'Exported image',
     });
+  });
+});
+
+describe('parseStacProvenance', () => {
+  const src = [{ id: 'a', links: [{ rel: 'self', href: 'https://example.com/a.json' }] }];
+  const state = {
+    drawnBbox: [150, -35, 151, -34], selectedDay: '2026-02-03', collection: 'sentinel-2-l2a',
+    vizMode: 'index', bands: { r: 'red', g: 'green', b: 'blue' }, singleBand: 'nir', indexBands: { a: 'nir', b: 'red' },
+    viz: { vmin: -0.2, vmax: 0.8, gamma: 1, colormap: 'rdylgn', colormapReversed: true, format: 'tif' },
+  };
+
+  it('recovers what buildStacProvenance recorded', () => {
+    const doc = buildStacProvenance({
+      appState: state, sourceItems: src, reproduceUrl: 'https://x.test/?bbox=1_2_3_4&width=640',
+    });
+    const { patch, width, sourceHrefs } = parseStacProvenance(doc);
+    expect(patch).toEqual({
+      drawnBbox: state.drawnBbox, selectedDay: '2026-02-03', collection: 'sentinel-2-l2a', vizMode: 'index',
+      indexBands: { a: 'nir', b: 'red' }, viz: state.viz,
+    });
+    expect(width).toBe(640);
+    expect(sourceHrefs).toEqual(['https://example.com/a.json']);
+  });
+
+  it('keeps default colormap for rgb exports, which record none', () => {
+    const doc = buildStacProvenance({ appState: { ...state, vizMode: 'rgb' }, sourceItems: src });
+    const { patch, width } = parseStacProvenance(doc);
+    expect(patch.bands).toEqual(state.bands);
+    expect(patch.viz).toEqual({ vmin: -0.2, vmax: 0.8, gamma: 1, format: 'tif' });
+    expect(width).toBeUndefined();
+  });
+
+  it('rejects documents that are not Cogniscient provenance', () => {
+    expect(() => parseStacProvenance({ type: 'Feature' })).toThrow(/not a Cogniscient/);
   });
 });

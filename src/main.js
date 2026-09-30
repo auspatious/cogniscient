@@ -18,7 +18,8 @@ import { renderSharePanel } from './ui/share-panel.js';
 import { renderStatusPanel } from './ui/status-panel.js';
 import { buildStacProvenance } from './stac-provenance.js';
 import { log } from './log.js';
-import { parseParams, buildParams } from './url-state.js';
+import { parseParams, buildParams, urlStateToPatch } from './url-state.js';
+import { activeBands, exportBaseFilename } from './filename.js';
 
 /* ── Map + panels ─────────────────────────────────────────────────────── */
 
@@ -29,29 +30,8 @@ import { parseParams, buildParams } from './url-state.js';
 // are created.
 const urlState = parseParams(location.search);
 {
-  const patch = {};
-  if (urlState.dateFrom) patch.dateFrom = urlState.dateFrom;
-  if (urlState.dateTo) patch.dateTo = urlState.dateTo;
-  // No explicit range in the URL, but a specific day was shared — search
-  // just that day rather than the rolling 30-day default, which may no
-  // longer include it by the time this link is opened.
-  if (!urlState.dateFrom && !urlState.dateTo && urlState.selectedDatetime) {
-    patch.dateFrom = urlState.selectedDatetime;
-    patch.dateTo = urlState.selectedDatetime;
-  }
-  if (urlState.cloudCoverMax !== undefined) patch.cloudCoverMax = urlState.cloudCoverMax;
-  if (urlState.width !== undefined) patch.targetWidth = urlState.width;
+  const patch = urlStateToPatch(urlState, state.viz);
   if (urlState.basemap && BASEMAPS.some((b) => b.id === urlState.basemap)) patch.basemap = urlState.basemap;
-  if (urlState.visualiseSettings) {
-    // `viz` from the URL is only ever a partial object (each field is
-    // written independently, only on deviation from default — see
-    // url-state.js) — merge it onto the current default `viz`, don't
-    // replace it outright, or the fields it omits become `undefined` and
-    // poison the vmin/vmax stretch maths with NaN.
-    const { viz, ...rest } = urlState.visualiseSettings;
-    Object.assign(patch, rest);
-    if (viz) patch.viz = { ...state.viz, ...viz };
-  }
   if (Object.keys(patch).length) set(patch);
 }
 
@@ -280,27 +260,11 @@ let fetchAbort = null;    // AbortController for the in-flight COG reads
 let overlayId = null;
 let overlayURL = null;
 
-// bands/singleBand/indexBands per vizMode → the fetch inputs for that mode.
-function activeBands() {
-  if (state.vizMode === 'single') return { band: state.singleBand };
-  if (state.vizMode === 'index') return state.indexBands;
-  return state.bands;
-}
-
-// Filename-friendly description of what's actually in the image, e.g.
-// "rgb-red-green-blue", "single-nir", "index-nir-red".
-function bandsSlug() {
-  const b = activeBands();
-  if (state.vizMode === 'single') return `single-${b.band}`;
-  if (state.vizMode === 'index') return `index-${b.a}-${b.b}`;
-  return `rgb-${b.r}-${b.g}-${b.b}`;
-}
-
 // The "recipe" a redraw is driven by — everything the user deliberately
 // chose (day/box/size/look). Changing any of this always redraws.
 function sceneRecipeKey() {
   if (!state.drawnBbox || !state.selectedDay) return null;
-  const bandsKey = Object.values(activeBands()).join(',');
+  const bandsKey = Object.values(activeBands(state)).join(',');
   return `${state.selectedDay}|${state.drawnBbox.join(',')}|${state.targetWidth}|${state.vizMode}|${bandsKey}`;
 }
 
@@ -358,7 +322,7 @@ async function startFetch() {
       items: group.renderItems,
       drawnBbox: bbox,
       mode: state.vizMode,
-      bands: activeBands(),
+      bands: activeBands(state),
       width: size.width,
       height: size.height,
       signal: fetchAbort.signal,
@@ -512,18 +476,12 @@ async function buildExportBlob(fmt) {
   return { blob, outWidth: img.width, outHeight: img.height };
 }
 
-async function exportBaseFilename(outWidth) {
-  const place = await placeName(state.drawnBbox);
-  const suffix = place ? `-${place}` : '';
-  return `cogniscient-${state.selectedDay}-${bandsSlug()}-${outWidth}px${suffix}`;
-}
-
 async function download() {
   if (!cache) return log.warn('No preview to save.');
   try {
     const fmt = state.viz.format;
     const { blob, outWidth, outHeight } = await buildExportBlob(fmt);
-    const base = await exportBaseFilename(outWidth);
+    const base = await exportBaseFilename(state, outWidth);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -550,7 +508,7 @@ async function downloadStac() {
     // asset href and its own downloaded filename exactly match the real
     // exported image/GeoTIFF's — the blob itself is discarded here.
     const { outWidth } = await buildExportBlob(fmt);
-    const base = await exportBaseFilename(outWidth);
+    const base = await exportBaseFilename(state, outWidth);
 
     const reproduceUrl = `${location.origin}${location.pathname}?${buildParams(state, location.search).toString()}${location.hash}`;
     const doc = buildStacProvenance({

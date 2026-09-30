@@ -4,7 +4,9 @@
  * https://github.com/radiantearth/stac-spec/blob/master/item-spec/item-spec.md
  */
 
-const APP_URL = 'https://cogniscient.auspatious.com/';
+import { parseParams } from './url-state.js';
+
+export const APP_URL = 'https://cogniscient.auspatious.com/';
 
 // Per STAC's asset roles best practice — 'data' is the raw analysable
 // asset, 'visual' is a rendered image meant for viewing, not analysis:
@@ -117,4 +119,38 @@ export function buildStacProvenance({ appState, sourceItems, reproduceUrl, expor
     links,
     assets,
   };
+}
+
+/**
+ * Inverse of buildStacProvenance: recovers what's needed to re-run an export
+ * from one of its provenance documents — a state `patch` (box, day,
+ * collection, bands, stretch, format), the output `width` (only recorded in
+ * the reproduce link), and the `sourceHrefs` of the exact scenes used.
+ */
+export function parseStacProvenance(doc) {
+  const vis = doc?.properties?.['cogniscient:visualisation'];
+  if (!vis || !doc.bbox) throw new Error('not a Cogniscient provenance document (no bbox / cogniscient:visualisation)');
+  const { mode, band, bands } = vis.selected_bands;
+  const { vmin, vmax, gamma, colormap, colormap_reversed: colormapReversed } = vis.stretch;
+
+  const patch = {
+    drawnBbox: doc.bbox,
+    selectedDay: doc.properties.datetime?.slice(0, 10) ?? null,
+    vizMode: mode,
+    // rgb exports don't record a colormap (it had no effect), so keep the default.
+    viz: { vmin, vmax, gamma, format: vis.format, ...(colormap === undefined ? {} : { colormap, colormapReversed }) },
+  };
+  if (doc.properties['cogniscient:collection']) patch.collection = doc.properties['cogniscient:collection'];
+  if (mode === 'single') patch.singleBand = band;
+  else if (mode === 'index') patch.indexBands = { a: bands.a, b: bands.b };
+  else patch.bands = { ...bands };
+
+  let width;
+  try {
+    const reproduce = doc.links?.find((l) => l.rel === 'alternate')?.href;
+    if (reproduce) width = parseParams(new URL(reproduce).search).width;
+  } catch { /* malformed link: fall back to the default width */ }
+
+  const sourceHrefs = (doc.links ?? []).filter((l) => l.rel === 'derived_from').map((l) => l.href);
+  return { patch, width, sourceHrefs };
 }

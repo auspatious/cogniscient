@@ -8,7 +8,7 @@ behaviour should update this file in the same commit. No drift!
 1. **Search**: query the Earth Search STAC API
    (https://earth-search.aws.element84.com/v1, collection sentinel-2-l2a)
    for the current map view, with a date range (default: last 30 days) and
-   a max cloud cover filter (default: 50%). Searching requires a minimum
+   a max cloud cover filter (default: 80%). Searching requires a minimum
    zoom level (8) to avoid huge result sets.
    - **Jump to a place**: a debounced (300ms) autocomplete box above the
      date range, forward-geocoding via Nominatim's `/search` endpoint
