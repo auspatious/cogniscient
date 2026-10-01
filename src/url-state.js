@@ -152,6 +152,25 @@ export function urlStateToPatch(urlState, currentViz) {
 }
 
 /**
+ * A MapLibre-style `#zoom/lat/lng` camera that frames `bbox`, for links made
+ * without a live map (the CLI). The app only restores a shared box if the
+ * map is zoomed in enough to search (zoom 8+) with the box in view, since
+ * scenes are looked up for the viewport — so without a camera in the link
+ * it opens at the default view and finds nothing. Sized for a modest
+ * viewport (a larger one just sees more around the box); zoom is floored
+ * to two decimals so the box always fits.
+ */
+export function cameraHash([w, s, e, n], viewport = { width: 640, height: 480 }) {
+  const mercY = (lat) => Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360));
+  // At zoom z the world is 512 * 2^z px wide (MapLibre's 512px tiles).
+  const fracW = (e - w) / 360;
+  const fracH = (mercY(n) - mercY(s)) / (2 * Math.PI);
+  const fit = Math.log2(Math.min(viewport.width / (512 * fracW), viewport.height / (512 * fracH)));
+  const zoom = Math.max(8, Math.floor(fit * 100) / 100);
+  return `#${zoom}/${((s + n) / 2).toFixed(4)}/${((w + e) / 2).toFixed(4)}`;
+}
+
+/**
  * Builds the query params for the current shareable state, preserving any
  * existing params this app doesn't know about (`currentSearch`). Only
  * fields that differ from DEFAULT_STATE are written.

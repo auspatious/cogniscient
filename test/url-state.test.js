@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseParams, buildParams, urlStateToPatch } from '../src/url-state.js';
+import { parseParams, buildParams, urlStateToPatch, cameraHash } from '../src/url-state.js';
 import { DEFAULT_STATE, defaultDateRange } from '../src/state.js';
 
 describe('parseParams', () => {
@@ -217,5 +217,25 @@ describe('urlStateToPatch', () => {
     const patch = urlStateToPatch(parseParams('?vmax=5000&bands=nir-red-green'), DEFAULT_STATE.viz);
     expect(patch.viz).toEqual({ ...DEFAULT_STATE.viz, vmax: 5000 });
     expect(patch.bands).toEqual({ r: 'nir', g: 'red', b: 'green' });
+  });
+});
+
+describe('cameraHash', () => {
+  it('centres on the box in MapLibre #zoom/lat/lng form', () => {
+    expect(cameraHash([148.0, -40.4, 148.4, -40.2])).toMatch(/^#\d+(\.\d+)?\/-40\.3000\/148\.2000$/);
+  });
+
+  it('zooms further in for smaller boxes, and never below the search minimum', () => {
+    const zoom = (bbox) => Number(cameraHash(bbox).slice(1).split('/')[0]);
+    expect(zoom([148.0, -40.31, 148.02, -40.29])).toBeGreaterThan(zoom([148.0, -40.4, 148.4, -40.2]));
+    expect(zoom([140, -44, 150, -38])).toBe(8);
+  });
+
+  it('frames the box inside the assumed viewport', () => {
+    const [w, s, e, n] = [147.93138, -40.40463, 148.46714, -40.17049];
+    const zoom = Number(cameraHash([w, s, e, n]).slice(1).split('/')[0]);
+    const widthPx = ((e - w) / 360) * 512 * 2 ** zoom;
+    expect(widthPx).toBeLessThanOrEqual(640);
+    expect(widthPx).toBeGreaterThan(300); // and not wastefully far out
   });
 });

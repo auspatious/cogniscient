@@ -11,7 +11,7 @@ import { searchItems } from '../src/stac.js';
 import { groupByDay } from '../src/mosaic.js';
 import { outputSize } from '../src/overviews.js';
 import { streamComposite, renderRGBA, cropToValid, toBlob, toGeoTIFFBlob } from '../src/export.js';
-import { parseParams, buildParams, urlStateToPatch } from '../src/url-state.js';
+import { parseParams, buildParams, urlStateToPatch, cameraHash } from '../src/url-state.js';
 import { activeBands, exportBaseFilename } from '../src/filename.js';
 import { buildStacProvenance, parseStacProvenance, APP_URL } from '../src/stac-provenance.js';
 import { COLORMAPS } from '../src/colormap.js';
@@ -262,7 +262,7 @@ if (o.stac) {
   const doc = buildStacProvenance({
     appState: s,
     sourceItems: group.renderItems,
-    reproduceUrl: `${APP_URL}?${buildParams(s, '').toString()}`,
+    reproduceUrl: `${APP_URL}?${buildParams(s, '').toString()}${cameraHash(s.drawnBbox)}`,
     exportFilename: basename(outPath),
   });
   writeFileSync(`${outPath}.stac.json`, JSON.stringify(doc, null, 2));
