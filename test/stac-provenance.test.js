@@ -149,6 +149,26 @@ describe('parseStacProvenance', () => {
     expect(width).toBeUndefined();
   });
 
+  it('falls back to the render extension when cogniscient:visualisation is absent', () => {
+    const doc = buildStacProvenance({ appState: state, sourceItems: src });
+    expect(doc.properties.renders.cogniscient).toMatchObject({
+      assets: ['nir', 'red'], asset_as_band: true, expression: '(nir-red)/(nir+red)', colormap_name: 'rdylgn_r',
+    });
+    delete doc.properties['cogniscient:visualisation'];
+    const { patch } = parseStacProvenance(doc);
+    expect(patch).toMatchObject({ vizMode: 'index', indexBands: { a: 'nir', b: 'red' } });
+    expect(patch.viz).toEqual({ vmin: -0.2, vmax: 0.8, gamma: 1, colormap: 'rdylgn', colormapReversed: true });
+  });
+
+  it('reads gamma and bands from an rgb render', () => {
+    const doc = buildStacProvenance({ appState: { ...state, vizMode: 'rgb', viz: { ...state.viz, gamma: 1.5 } }, sourceItems: src });
+    expect(doc.properties.renders.cogniscient.color_formula).toBe('gamma rgb 1.5');
+    delete doc.properties['cogniscient:visualisation'];
+    const { patch } = parseStacProvenance(doc);
+    expect(patch.bands).toEqual(state.bands);
+    expect(patch.viz.gamma).toBe(1.5);
+  });
+
   it('rejects documents that are not Cogniscient provenance', () => {
     expect(() => parseStacProvenance({ type: 'Feature' })).toThrow(/not a Cogniscient/);
   });

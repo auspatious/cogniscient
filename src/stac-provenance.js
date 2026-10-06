@@ -6,6 +6,8 @@
 
 import { parseParams } from './url-state.js';
 
+const RENDER_EXT = 'https://stac-extensions.github.io/render/v2.1.0/schema.json';
+
 export const APP_URL = 'https://cogniscient.auspatious.com/';
 
 // Per STAC's asset roles best practice — 'data' is the raw analysable
@@ -38,6 +40,35 @@ function activeBandSelection(appState) {
 
 function selfHref(item) {
   return item?.links?.find((l) => l.rel === 'self')?.href ?? null;
+}
+
+// The same settings as a STAC render extension object, so other tools (STAC
+// Browser, titiler) can apply them. Spec: https://github.com/stac-extensions/render
+// Strictly `assets` should be keys of this item; here they name the source
+// scenes' assets (see derived_from links). Gamma only fits rgb (color_formula).
+function buildRender(appState) {
+  const { vizMode, viz } = appState;
+  const rescale = (n) => Array.from({ length: n }, () => [viz.vmin, viz.vmax]);
+  const colormap = viz.colormap === 'gray' && !viz.colormapReversed
+    ? {}
+    : { colormap_name: viz.colormap + (viz.colormapReversed ? '_r' : '') };
+  if (vizMode === 'rgb') {
+    const assets = [appState.bands.r, appState.bands.g, appState.bands.b];
+    return {
+      assets,
+      rescale: rescale(3),
+      ...(viz.gamma === 1 ? {} : { color_formula: `gamma rgb ${viz.gamma}` }),
+    };
+  }
+  if (vizMode === 'single') return { assets: [appState.singleBand], rescale: rescale(1), ...colormap };
+  const { a, b } = appState.indexBands;
+  return {
+    assets: [a, b],
+    asset_as_band: true,
+    expression: `(${a}-${b})/(${a}+${b})`,
+    rescale: rescale(1),
+    ...colormap,
+  };
 }
 
 export function buildStacProvenance({ appState, sourceItems, reproduceUrl, exportFilename }) {
@@ -95,7 +126,7 @@ export function buildStacProvenance({ appState, sourceItems, reproduceUrl, expor
 
   return {
     stac_version: '1.0.0',
-    stac_extensions: ['https://stac-extensions.github.io/processing/v1.1.0/schema.json'],
+    stac_extensions: ['https://stac-extensions.github.io/processing/v1.1.0/schema.json', RENDER_EXT],
     type: 'Feature',
     id: `cogniscient-${appState.selectedDay}-${created}`,
     bbox,
@@ -110,6 +141,7 @@ export function buildStacProvenance({ appState, sourceItems, reproduceUrl, expor
         ? `Composited from ${sourceItems.length} Sentinel-2 scene(s): ${sourceItems.map((item) => item.id).join(', ')}`
         : 'No source scenes recorded.',
       'cogniscient:collection': appState.collection,
+      renders: { cogniscient: buildRender(appState) },
       'cogniscient:visualisation': {
         selected_bands: selectedBands,
         stretch,
@@ -121,6 +153,33 @@ export function buildStacProvenance({ appState, sourceItems, reproduceUrl, expor
   };
 }
 
+// Best-effort reading of a render extension object (first one in the item)
+// into the shape of `cogniscient:visualisation`. Handles what buildRender
+// writes; returns undefined for anything else (e.g. other expressions).
+function visFromRender(renders) {
+  const r = Object.values(renders ?? {})[0];
+  const [vmin, vmax] = r?.rescale?.[0] ?? [];
+  if (!r?.assets || vmin === undefined) return undefined;
+  const cm = r.colormap_name;
+  const stretch = {
+    vmin,
+    vmax,
+    gamma: Number(r.color_formula?.match(/gamma rgb ([\d.]+)/)?.[1] ?? 1),
+    ...(cm ? { colormap: cm.replace(/_r$/, ''), colormap_reversed: cm.endsWith('_r') } : {}),
+  };
+  if (r.expression) {
+    const m = r.expression.match(/^\(\s*(\w+)\s*-\s*(\w+)\s*\)\s*\/\s*\(\s*\1\s*\+\s*\2\s*\)$/);
+    if (!m) return undefined;
+    return { selected_bands: { mode: 'index', bands: { a: m[1], b: m[2] } }, stretch };
+  }
+  if (r.assets.length === 1) return { selected_bands: { mode: 'single', band: r.assets[0] }, stretch };
+  if (r.assets.length === 3) {
+    const [rr, g, b] = r.assets;
+    return { selected_bands: { mode: 'rgb', bands: { r: rr, g, b } }, stretch };
+  }
+  return undefined;
+}
+
 /**
  * Inverse of buildStacProvenance: recovers what's needed to re-run an export
  * from one of its provenance documents — a state `patch` (box, day,
@@ -128,8 +187,8 @@ export function buildStacProvenance({ appState, sourceItems, reproduceUrl, expor
  * the reproduce link), and the `sourceHrefs` of the exact scenes used.
  */
 export function parseStacProvenance(doc) {
-  const vis = doc?.properties?.['cogniscient:visualisation'];
-  if (!vis || !doc.bbox) throw new Error('not a Cogniscient provenance document (no bbox / cogniscient:visualisation)');
+  const vis = doc?.properties?.['cogniscient:visualisation'] ?? visFromRender(doc?.properties?.renders);
+  if (!vis || !doc.bbox) throw new Error('not a Cogniscient provenance document (no bbox / cogniscient:visualisation or usable render)');
   const { mode, band, bands } = vis.selected_bands;
   const { vmin, vmax, gamma, colormap, colormap_reversed: colormapReversed } = vis.stretch;
 
@@ -138,7 +197,7 @@ export function parseStacProvenance(doc) {
     selectedDay: doc.properties.datetime?.slice(0, 10) ?? null,
     vizMode: mode,
     // rgb exports don't record a colormap (it had no effect), so keep the default.
-    viz: { vmin, vmax, gamma, format: vis.format, ...(colormap === undefined ? {} : { colormap, colormapReversed }) },
+    viz: { vmin, vmax, gamma, ...(vis.format ? { format: vis.format } : {}), ...(colormap === undefined ? {} : { colormap, colormapReversed }) },
   };
   if (doc.properties['cogniscient:collection']) patch.collection = doc.properties['cogniscient:collection'];
   if (mode === 'single') patch.singleBand = band;
