@@ -334,7 +334,7 @@ export async function streamComposite({ items, drawnBbox, mode = 'rgb', bands = 
       } catch (err) {
         // AbortError means the caller cancelled this fetch (e.g. the user
         // picked a different day/box) — expected, not a real failure.
-        if (err.name !== 'AbortError') onLog?.(`Skipped ${item.id}: ${err.message}`);
+        if (err.name !== 'AbortError') onLog?.(`Skipped ${item.id}: ${err.message}${err.cause ? ` (${err.cause.code ?? err.cause.message})` : ''}`);
       }
     }),
   );

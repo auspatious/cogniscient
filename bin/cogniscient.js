@@ -5,6 +5,15 @@
 import { parseArgs } from 'node:util';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
+import { setDefaultResultOrder } from 'node:dns';
+import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
+import { Agent, setGlobalDispatcher } from 'undici';
+
+// ponytail: guess for UND_ERR_CONNECT_TIMEOUT on S3 behind a dead IPv6 route; drop if it doesn't help.
+setDefaultResultOrder('ipv4first');
+setDefaultAutoSelectFamilyAttemptTimeout(500);
+// Node's fetch gives up connecting after 10s; slow links to S3 need longer.
+setGlobalDispatcher(new Agent({ connect: { timeout: 60_000 } }));
 
 import { DEFAULT_STATE, DEFAULT_COLLECTION, DEFAULT_NATIVE_GSD, HARD_LIMIT_KM2, defaultDateRange } from '../src/state.js';
 import { searchItems } from '../src/stac.js';
@@ -195,7 +204,7 @@ let group;
 if (sourceHrefs) {
   log(`Fetching ${sourceHrefs.length} source scene record(s)…`);
   const renderItems = await Promise.all(sourceHrefs.map(async (href) => {
-    const res = await fetch(href);
+    const res = await fetch(href).catch((e) => fail(`couldn't fetch source scene ${href}: ${e.cause?.code ?? e.message}`));
     if (!res.ok) fail(`couldn't fetch source scene ${href}: ${res.status} ${res.statusText}`);
     return res.json();
   }));
